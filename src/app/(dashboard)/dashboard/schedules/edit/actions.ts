@@ -495,3 +495,262 @@ export async function submitVersionAction(formData: FormData) {
   revalidatePath("/dashboard/schedules/edit");
   revalidatePath("/dashboard/approval");
 }
+
+import { runAutoScheduler, type AutoScheduleResultSummary } from "@/server/validation/auto-scheduling";
+
+export async function autoScheduleAction(
+  scheduleVersionId: string,
+  prioritizeDept: boolean,
+  maximizeRoomEfficiency: boolean
+): Promise<AutoScheduleResultSummary> {
+  const currentUser = await requireCurrentUser();
+  requireRole(currentUser, RoleCode.Registrar);
+
+  if (!scheduleVersionId) throw new Error("Missing schedule version ID");
+
+  const result = await withTransaction(async (client) => {
+    // 1. Fetch original version info
+    const version = await transactionQuery<{
+      academic_term_id: string;
+      version_number: number;
+      schedule_status_code: string;
+    }>(
+      client,
+      `
+        SELECT sv.academic_term_id, sv.version_number, ss.schedule_status_code
+        FROM schedule_versions sv
+        JOIN schedule_statuses ss ON sv.schedule_status_id = ss.schedule_status_id
+        WHERE sv.schedule_version_id = $1
+      `,
+      [scheduleVersionId]
+    );
+
+    if (version.rowCount === 0 || !version.rows[0]) {
+      throw new Error("Schedule version not found");
+    }
+
+    const ver = version.rows[0];
+    const academicTermId = ver.academic_term_id;
+    const backupVersionNum = -1000 - ver.version_number;
+
+    // Check if editable
+    if (!["DRAFT", "CORRECTION_OPEN"].includes(ver.schedule_status_code)) {
+      throw new Error("Only draft or correction-open schedule versions can be auto-scheduled");
+    }
+
+    // 2. Clear any existing backup for this version
+    await transactionQuery(
+      client,
+      `
+        DELETE FROM schedule_versions 
+        WHERE academic_term_id = $1 AND version_number = $2
+      `,
+      [academicTermId, backupVersionNum]
+    );
+
+    const draftStatus = await transactionQuery<{ schedule_status_id: string }>(
+      client,
+      `SELECT schedule_status_id FROM schedule_statuses WHERE schedule_status_code = 'DRAFT'`
+    );
+    if (!draftStatus.rows[0]) throw new Error("Draft status lookup failed");
+
+    // 3. Create Backup Version
+    const backupVer = await transactionQuery<{ schedule_version_id: string }>(
+      client,
+      `
+        INSERT INTO schedule_versions (academic_term_id, version_number, schedule_status_id, created_by)
+        VALUES ($1, $2, $3, $4)
+        RETURNING schedule_version_id
+      `,
+      [academicTermId, backupVersionNum, draftStatus.rows[0].schedule_status_id, currentUser.userId]
+    );
+    const backupVersionId = backupVer.rows[0].schedule_version_id;
+
+    // 4. Copy current assignments to backup
+    await transactionQuery(
+      client,
+      `
+        INSERT INTO schedule_assignments (schedule_version_id, subject_offering_id, faculty_term_profile_id, assignment_status_id, overload_override_request_id, created_by)
+        SELECT $1, subject_offering_id, faculty_term_profile_id, assignment_status_id, overload_override_request_id, $2
+        FROM schedule_assignments
+        WHERE schedule_version_id = $3
+      `,
+      [backupVersionId, currentUser.userId, scheduleVersionId]
+    );
+
+    // 5. Copy current meetings to backup
+    await transactionQuery(
+      client,
+      `
+        INSERT INTO schedule_meetings (schedule_assignment_id, term_time_slot_id, room_id, meeting_type)
+        SELECT 
+          (
+            SELECT sa_new.schedule_assignment_id 
+            FROM schedule_assignments sa_new 
+            WHERE sa_new.schedule_version_id = $1 AND sa_new.subject_offering_id = sa_old.subject_offering_id
+            LIMIT 1
+          ), 
+          sm.term_time_slot_id, sm.room_id, sm.meeting_type
+        FROM schedule_meetings sm
+        JOIN schedule_assignments sa_old ON sm.schedule_assignment_id = sa_old.schedule_assignment_id
+        WHERE sa_old.schedule_version_id = $2
+      `,
+      [backupVersionId, scheduleVersionId]
+    );
+
+    // 6. Run the Auto-Scheduler Solver
+    const solverResult = await runAutoScheduler(
+      scheduleVersionId,
+      { prioritizeDept, maximizeRoomEfficiency },
+      currentUser.userId
+    );
+
+    return {
+      ...solverResult,
+      backupVersionId,
+    };
+  });
+
+  revalidatePath("/dashboard/schedules/edit");
+  return result;
+}
+
+export async function rollbackAutoScheduleAction(
+  scheduleVersionId: string,
+  backupVersionId: string
+): Promise<{ success: boolean }> {
+  const currentUser = await requireCurrentUser();
+  requireRole(currentUser, RoleCode.Registrar);
+
+  if (!scheduleVersionId || !backupVersionId) {
+    throw new Error("Missing required parameters");
+  }
+
+  await withTransaction(async (client) => {
+    // 1. Verify backup belongs to correct term/version
+    const originalVer = await transactionQuery<{ version_number: number; academic_term_id: string }>(
+      client,
+      `SELECT version_number, academic_term_id FROM schedule_versions WHERE schedule_version_id = $1`,
+      [scheduleVersionId]
+    );
+    const backupVer = await transactionQuery<{ version_number: number; academic_term_id: string }>(
+      client,
+      `SELECT version_number, academic_term_id FROM schedule_versions WHERE schedule_version_id = $1`,
+      [backupVersionId]
+    );
+
+    if (!originalVer.rows[0] || !backupVer.rows[0]) {
+      throw new Error("Invalid original or backup version");
+    }
+
+    const orig = originalVer.rows[0];
+    const back = backupVer.rows[0];
+
+    if (back.version_number !== -1000 - orig.version_number || back.academic_term_id !== orig.academic_term_id) {
+      throw new Error("Backup mismatch with original version");
+    }
+
+    // 2. Delete all current meetings and assignments on original
+    await transactionQuery(
+      client,
+      `
+        DELETE FROM schedule_meetings 
+        WHERE schedule_assignment_id IN (
+          SELECT schedule_assignment_id FROM schedule_assignments WHERE schedule_version_id = $1
+        )
+      `,
+      [scheduleVersionId]
+    );
+
+    await transactionQuery(
+      client,
+      `DELETE FROM schedule_assignments WHERE schedule_version_id = $1`,
+      [scheduleVersionId]
+    );
+
+    // 3. Copy back assignments from backup
+    await transactionQuery(
+      client,
+      `
+        INSERT INTO schedule_assignments (schedule_version_id, subject_offering_id, faculty_term_profile_id, assignment_status_id, overload_override_request_id, created_by)
+        SELECT $1, subject_offering_id, faculty_term_profile_id, assignment_status_id, overload_override_request_id, $2
+        FROM schedule_assignments
+        WHERE schedule_version_id = $3
+      `,
+      [scheduleVersionId, currentUser.userId, backupVersionId]
+    );
+
+    // 4. Copy back meetings from backup
+    await transactionQuery(
+      client,
+      `
+        INSERT INTO schedule_meetings (schedule_assignment_id, term_time_slot_id, room_id, meeting_type)
+        SELECT 
+          (
+            SELECT sa_new.schedule_assignment_id 
+            FROM schedule_assignments sa_new 
+            WHERE sa_new.schedule_version_id = $1 AND sa_new.subject_offering_id = sa_old.subject_offering_id
+            LIMIT 1
+          ), 
+          sm.term_time_slot_id, sm.room_id, sm.meeting_type
+        FROM schedule_meetings sm
+        JOIN schedule_assignments sa_old ON sm.schedule_assignment_id = sa_old.schedule_assignment_id
+        WHERE sa_old.schedule_version_id = $2
+      `,
+      [scheduleVersionId, backupVersionId]
+    );
+
+    // 5. Delete backup version
+    await transactionQuery(
+      client,
+      `DELETE FROM schedule_versions WHERE schedule_version_id = $1`,
+      [backupVersionId]
+    );
+
+    await recordAuditLog({
+      actorUserId: currentUser.userId,
+      actionCode: "SCHEDULE_AUTO_GENERATED_ROLLBACK",
+      moduleCode: "SCHEDULING",
+      targetTable: "schedule_versions",
+      targetId: scheduleVersionId,
+      newValueJson: { rolledBack: true, backupVersionId },
+    });
+  });
+
+  revalidatePath("/dashboard/schedules/edit");
+  return { success: true };
+}
+
+export async function commitAutoScheduleAction(
+  scheduleVersionId: string,
+  backupVersionId: string
+): Promise<{ success: boolean }> {
+  const currentUser = await requireCurrentUser();
+  requireRole(currentUser, RoleCode.Registrar);
+
+  if (!scheduleVersionId || !backupVersionId) {
+    throw new Error("Missing required parameters");
+  }
+
+  await withTransaction(async (client) => {
+    // Delete the backup version
+    await transactionQuery(
+      client,
+      `DELETE FROM schedule_versions WHERE schedule_version_id = $1`,
+      [backupVersionId]
+    );
+
+    await recordAuditLog({
+      actorUserId: currentUser.userId,
+      actionCode: "SCHEDULE_AUTO_GENERATED_COMMITTED",
+      moduleCode: "SCHEDULING",
+      targetTable: "schedule_versions",
+      targetId: scheduleVersionId,
+      newValueJson: { committed: true, backupVersionId },
+    });
+  });
+
+  revalidatePath("/dashboard/schedules/edit");
+  return { success: true };
+}
+

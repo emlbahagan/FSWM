@@ -4,6 +4,7 @@ import { requireRole, RoleCode } from "@/server/rbac";
 import { queryRows, queryOne } from "@/server/db";
 import { validateScheduleVersion, ValidationReport } from "@/server/validation/scheduling";
 import { createVersionAction, assignFacultyAction, saveMeetingAction, deleteMeetingAction, submitVersionAction } from "@/app/(dashboard)/dashboard/schedules/edit/actions";
+import AutoScheduleAssistant from "@/app/(dashboard)/dashboard/schedules/edit/AutoScheduleAssistant";
 
 export const dynamic = "force-dynamic";
 
@@ -287,6 +288,13 @@ export default async function ScheduleEditorPage({
   const departments = await queryRows<{ code: string; name: string }>(`SELECT department_code as "code", department_name as "name" FROM departments WHERE is_active = true ORDER BY department_name`);
   const isEditable = currentVersion && ["DRAFT", "CORRECTION_OPEN"].includes(currentVersion.statusCode);
 
+  const stats = {
+    unresolvedCount: currentVersion ? offerings.filter((o) => !o.facultyProfileId).length : 0,
+    activeRoomsCount: roomList.length,
+    availableFacultyCount: facultyList.length,
+    hasTimeSlots: timeSlots.length > 0,
+  };
+
   return (
     <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 space-y-8">
       {/* Header */}
@@ -303,6 +311,10 @@ export default async function ScheduleEditorPage({
             <div className="inline-flex items-center gap-2 rounded-full bg-[var(--teal)]/10 px-3 py-1 text-xs font-semibold text-[var(--teal)] border border-[var(--teal)]/20">
               <Calendar size={14} /> Active Term: {activeTerm.schoolYear} - {activeTerm.termName}
             </div>
+
+            {isEditable && currentVersion && (
+              <AutoScheduleAssistant scheduleVersionId={currentVersion.scheduleVersionId} stats={stats} />
+            )}
 
             {(!currentVersion || !["DRAFT", "SUBMITTED", "CORRECTION_OPEN"].includes(currentVersion.statusCode)) && (
               <form action={createVersionAction}>
