@@ -1,14 +1,21 @@
 import Link from "next/link";
-import { ArrowLeft, UserPlus } from "lucide-react";
+import { ArrowLeft, UserPlus, AlertCircle } from "lucide-react";
 import { requireCurrentUser } from "@/server/auth";
 import { requireRole, RoleCode } from "@/server/rbac";
 import { createUserAction } from "@/app/(dashboard)/dashboard/users/actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewUserPage() {
+export default async function NewUserPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const currentUser = await requireCurrentUser();
   requireRole(currentUser, RoleCode.SystemAdmin);
+
+  const { error } = await searchParams;
+  const errorMsg = typeof error === "string" ? error : undefined;
 
   return (
     <div className="mx-auto max-w-4xl px-5 py-8 sm:px-8">
@@ -26,6 +33,22 @@ export default async function NewUserPage() {
           </p>
         </div>
       </div>
+
+      {errorMsg && (
+        <div className="mt-6 flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50/50 p-4 text-sm text-rose-800 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400">
+          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h4 className="font-bold">Account Creation Blocked</h4>
+            <p className="mt-1 text-xs leading-relaxed">{errorMsg}</p>
+          </div>
+          <Link
+            href="/dashboard/users/new"
+            className="text-xs font-semibold underline hover:text-rose-600 transition"
+          >
+            Dismiss
+          </Link>
+        </div>
+      )}
 
       <div className="mt-8 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-sm">
         <form action={createUserAction} className="space-y-6">

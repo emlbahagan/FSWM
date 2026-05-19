@@ -19,32 +19,41 @@ export async function createUserAction(formData: FormData) {
     throw new Error("Missing required fields");
   }
 
-  const passwordHash = await hashPassword(rawPassword);
+  try {
+    const passwordHash = await hashPassword(rawPassword);
 
-  const newUser = await queryOne<{ user_id: string }>(
-    `
-      INSERT INTO users (email, first_name, last_name, password_hash, is_active, force_password_reset)
-      VALUES ($1, $2, $3, $4, true, true)
-      RETURNING user_id
-    `,
-    [email, firstName, lastName, passwordHash]
-  );
+    const newUser = await queryOne<{ user_id: string }>(
+      `
+        INSERT INTO users (email, first_name, last_name, password_hash, is_active, force_password_reset)
+        VALUES ($1, $2, $3, $4, true, true)
+        RETURNING user_id
+      `,
+      [email, firstName, lastName, passwordHash]
+    );
 
-  if (!newUser) {
-    throw new Error("Failed to create user");
+    if (!newUser) {
+      throw new Error("Failed to create user");
+    }
+
+    await recordAuditLog({
+      actorUserId: currentUser.userId,
+      actionCode: "USER_CREATED",
+      moduleCode: "USERS",
+      targetTable: "users",
+      targetId: newUser.user_id,
+      newValueJson: { email, firstName, lastName, isActive: true, forcePasswordReset: true },
+    });
+
+    revalidatePath("/dashboard/users");
+    redirect("/dashboard/users");
+  } catch (err: unknown) {
+    const errorObject = err as { message?: string; digest?: string };
+    if (errorObject.digest?.startsWith("NEXT_REDIRECT")) {
+      throw err;
+    }
+    const msg = errorObject.message || "An unexpected error occurred during user creation.";
+    redirect(`/dashboard/users/new?error=${encodeURIComponent(msg)}`);
   }
-
-  await recordAuditLog({
-    actorUserId: currentUser.userId,
-    actionCode: "USER_CREATED",
-    moduleCode: "USERS",
-    targetTable: "users",
-    targetId: newUser.user_id,
-    newValueJson: { email, firstName, lastName, isActive: true, forcePasswordReset: true },
-  });
-
-  revalidatePath("/dashboard/users");
-  redirect("/dashboard/users");
 }
 
 export async function updateUserAction(formData: FormData) {
@@ -61,27 +70,36 @@ export async function updateUserAction(formData: FormData) {
     throw new Error("Missing required fields");
   }
 
-  await query(
-    `
-      UPDATE users
-      SET first_name = $1, last_name = $2, is_active = $3, force_password_reset = $4, updated_at = now()
-      WHERE user_id = $5
-    `,
-    [firstName, lastName, isActive, forcePasswordReset, userId]
-  );
+  try {
+    await query(
+      `
+        UPDATE users
+        SET first_name = $1, last_name = $2, is_active = $3, force_password_reset = $4, updated_at = now()
+        WHERE user_id = $5
+      `,
+      [firstName, lastName, isActive, forcePasswordReset, userId]
+    );
 
-  await recordAuditLog({
-    actorUserId: currentUser.userId,
-    actionCode: "USER_UPDATED",
-    moduleCode: "USERS",
-    targetTable: "users",
-    targetId: userId,
-    newValueJson: { firstName, lastName, isActive, forcePasswordReset },
-  });
+    await recordAuditLog({
+      actorUserId: currentUser.userId,
+      actionCode: "USER_UPDATED",
+      moduleCode: "USERS",
+      targetTable: "users",
+      targetId: userId,
+      newValueJson: { firstName, lastName, isActive, forcePasswordReset },
+    });
 
-  revalidatePath(`/dashboard/users/${userId}`);
-  revalidatePath("/dashboard/users");
-  redirect("/dashboard/users");
+    revalidatePath(`/dashboard/users/${userId}`);
+    revalidatePath("/dashboard/users");
+    redirect("/dashboard/users");
+  } catch (err: unknown) {
+    const errorObject = err as { message?: string; digest?: string };
+    if (errorObject.digest?.startsWith("NEXT_REDIRECT")) {
+      throw err;
+    }
+    const msg = errorObject.message || "An unexpected error occurred during user update.";
+    redirect(`/dashboard/users/${userId}?error=${encodeURIComponent(msg)}`);
+  }
 }
 
 export async function assignRoleAction(formData: FormData) {
@@ -97,55 +115,64 @@ export async function assignRoleAction(formData: FormData) {
     throw new Error("Missing required fields");
   }
 
-  const role = await queryOne<{ role_id: string }>(
-    `SELECT role_id FROM roles WHERE role_code = $1`,
-    [roleCode]
-  );
+  try {
+    const role = await queryOne<{ role_id: string }>(
+      `SELECT role_id FROM roles WHERE role_code = $1`,
+      [roleCode]
+    );
 
-  if (!role) {
-    throw new Error("Invalid role code");
+    if (!role) {
+      throw new Error("Invalid role code");
+    }
+
+    const scopeCondition = departmentId ? `scope_department_id = $3` : `scope_department_id IS NULL`;
+    const queryParams = departmentId ? [userId, role.role_id, departmentId] : [userId, role.role_id];
+
+    const existing = await queryOne<{ user_role_assignment_id: string }>(
+      `
+        SELECT user_role_assignment_id
+        FROM user_role_assignments
+        WHERE user_id = $1 AND role_id = $2 AND ${scopeCondition} AND revoked_at IS NULL
+      `,
+      queryParams
+    );
+
+    if (existing) {
+      throw new Error(`User already has active role assignment for ${roleCode} in this scope.`);
+    }
+
+    const assignment = await queryOne<{ user_role_assignment_id: string }>(
+      `
+        INSERT INTO user_role_assignments (user_id, role_id, scope_department_id, assigned_by)
+        VALUES ($1, $2, $3, $4)
+        RETURNING user_role_assignment_id
+      `,
+      [userId, role.role_id, departmentId, currentUser.userId]
+    );
+
+    if (!assignment) {
+      throw new Error("Failed to assign role or duplicate assignment exists");
+    }
+
+    await recordAuditLog({
+      actorUserId: currentUser.userId,
+      actionCode: "ROLE_ASSIGNED",
+      moduleCode: "USERS",
+      targetTable: "user_role_assignments",
+      targetId: assignment.user_role_assignment_id,
+      newValueJson: { userId, roleCode, departmentId },
+    });
+
+    revalidatePath(`/dashboard/users/${userId}`);
+    revalidatePath("/dashboard/users");
+  } catch (err: unknown) {
+    const errorObject = err as { message?: string; digest?: string };
+    if (errorObject.digest?.startsWith("NEXT_REDIRECT")) {
+      throw err;
+    }
+    const msg = errorObject.message || "An unexpected error occurred during role assignment.";
+    redirect(`/dashboard/users/${userId}?error=${encodeURIComponent(msg)}`);
   }
-
-  const scopeCondition = departmentId ? `scope_department_id = $3` : `scope_department_id IS NULL`;
-  const queryParams = departmentId ? [userId, role.role_id, departmentId] : [userId, role.role_id];
-
-  const existing = await queryOne<{ user_role_assignment_id: string }>(
-    `
-      SELECT user_role_assignment_id
-      FROM user_role_assignments
-      WHERE user_id = $1 AND role_id = $2 AND ${scopeCondition} AND revoked_at IS NULL
-    `,
-    queryParams
-  );
-
-  if (existing) {
-    throw new Error(`User already has active role assignment for ${roleCode} in this scope.`);
-  }
-
-  const assignment = await queryOne<{ user_role_assignment_id: string }>(
-    `
-      INSERT INTO user_role_assignments (user_id, role_id, scope_department_id, assigned_by)
-      VALUES ($1, $2, $3, $4)
-      RETURNING user_role_assignment_id
-    `,
-    [userId, role.role_id, departmentId, currentUser.userId]
-  );
-
-  if (!assignment) {
-    throw new Error("Failed to assign role or duplicate assignment exists");
-  }
-
-  await recordAuditLog({
-    actorUserId: currentUser.userId,
-    actionCode: "ROLE_ASSIGNED",
-    moduleCode: "USERS",
-    targetTable: "user_role_assignments",
-    targetId: assignment.user_role_assignment_id,
-    newValueJson: { userId, roleCode, departmentId },
-  });
-
-  revalidatePath(`/dashboard/users/${userId}`);
-  revalidatePath("/dashboard/users");
 }
 
 export async function revokeRoleAction(formData: FormData) {
@@ -159,26 +186,35 @@ export async function revokeRoleAction(formData: FormData) {
     throw new Error("Missing required fields");
   }
 
-  await query(
-    `
-      UPDATE user_role_assignments
-      SET revoked_at = now()
-      WHERE user_role_assignment_id = $1 AND revoked_at IS NULL
-    `,
-    [assignmentId]
-  );
+  try {
+    await query(
+      `
+        UPDATE user_role_assignments
+        SET revoked_at = now()
+        WHERE user_role_assignment_id = $1 AND revoked_at IS NULL
+      `,
+      [assignmentId]
+    );
 
-  await recordAuditLog({
-    actorUserId: currentUser.userId,
-    actionCode: "ROLE_REVOKED",
-    moduleCode: "USERS",
-    targetTable: "user_role_assignments",
-    targetId: assignmentId,
-    newValueJson: { status: "REVOKED" },
-  });
+    await recordAuditLog({
+      actorUserId: currentUser.userId,
+      actionCode: "ROLE_REVOKED",
+      moduleCode: "USERS",
+      targetTable: "user_role_assignments",
+      targetId: assignmentId,
+      newValueJson: { status: "REVOKED" },
+    });
 
-  revalidatePath(`/dashboard/users/${userId}`);
-  revalidatePath("/dashboard/users");
+    revalidatePath(`/dashboard/users/${userId}`);
+    revalidatePath("/dashboard/users");
+  } catch (err: unknown) {
+    const errorObject = err as { message?: string; digest?: string };
+    if (errorObject.digest?.startsWith("NEXT_REDIRECT")) {
+      throw err;
+    }
+    const msg = errorObject.message || "An unexpected error occurred during role revocation.";
+    redirect(`/dashboard/users/${userId}?error=${encodeURIComponent(msg)}`);
+  }
 }
 
 export async function deleteUserAction(formData: FormData) {

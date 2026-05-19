@@ -50,6 +50,18 @@ export default async function UserDetailPage({
   const { error } = await searchParams;
   const errorMsg = typeof error === "string" ? error : undefined;
 
+  let alertHeader = "Action Blocked";
+  if (errorMsg) {
+    const lower = errorMsg.toLowerCase();
+    if (lower.includes("delete") || lower.includes("footprints")) {
+      alertHeader = "Account Deletion Blocked";
+    } else if (lower.includes("role") || lower.includes("assignment") || lower.includes("revoke")) {
+      alertHeader = "Role Action Blocked";
+    } else if (lower.includes("update") || lower.includes("fields")) {
+      alertHeader = "Account Update Blocked";
+    }
+  }
+
   const user = await queryOne<UserDetail>(
     `
       SELECT user_id as "userId", email, first_name as "firstName", last_name as "lastName", is_active as "isActive", force_password_reset as "forcePasswordReset"
@@ -119,7 +131,7 @@ export default async function UserDetailPage({
         <div className="mt-6 flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50/50 p-4 text-sm text-rose-800 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400">
           <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <h4 className="font-bold">Operational Deletion Blocked</h4>
+            <h4 className="font-bold">{alertHeader}</h4>
             <p className="mt-1 text-xs leading-relaxed">{errorMsg}</p>
           </div>
           <Link
