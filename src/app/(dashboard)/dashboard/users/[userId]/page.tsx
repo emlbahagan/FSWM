@@ -3,7 +3,7 @@ import { ArrowLeft, Save, ShieldPlus, Trash2, Shield, AlertCircle } from "lucide
 import { requireCurrentUser } from "@/server/auth";
 import { requireRole, RoleCode as RoleCodeConstants } from "@/server/rbac";
 import { queryOne, queryRows } from "@/server/db";
-import { updateUserAction, assignRoleAction, revokeRoleAction } from "@/app/(dashboard)/dashboard/users/actions";
+import { updateUserAction, assignRoleAction, revokeRoleAction, deleteUserAction } from "@/app/(dashboard)/dashboard/users/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -112,78 +112,113 @@ export default async function UserDetailPage({
 
       <div className="mt-8 grid gap-8 lg:grid-cols-2">
         {/* Account Details Form */}
-        <div className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">Account Information</h2>
-          <form action={updateUserAction} className="mt-6 space-y-6">
-            <input type="hidden" name="userId" value={user.userId} />
+        <div className="space-y-8">
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-sm">
+            <h2 className="text-lg font-semibold">Account Information</h2>
+            <form action={updateUserAction} className="mt-6 space-y-6">
+              <input type="hidden" name="userId" value={user.userId} />
 
-            <div className="grid gap-6 sm:grid-cols-2">
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="firstName" className="block text-sm font-semibold">
+                    First Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="firstName"
+                    name="firstName"
+                    defaultValue={user.firstName}
+                    required
+                    className="mt-2 w-full rounded-md border border-[var(--line)] bg-background px-3 py-2 text-sm placeholder:text-[var(--muted)] focus:border-[var(--teal)] focus:outline-none focus:ring-1 focus:ring-[var(--teal)]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="lastName" className="block text-sm font-semibold">
+                    Last Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="lastName"
+                    name="lastName"
+                    defaultValue={user.lastName}
+                    required
+                    className="mt-2 w-full rounded-md border border-[var(--line)] bg-background px-3 py-2 text-sm placeholder:text-[var(--muted)] focus:border-[var(--teal)] focus:outline-none focus:ring-1 focus:ring-[var(--teal)]"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label htmlFor="firstName" className="block text-sm font-semibold">
-                  First Name <span className="text-red-500">*</span>
+                <label htmlFor="email" className="block text-sm font-semibold">
+                  Email Address
                 </label>
                 <input
-                  type="text"
-                  id="firstName"
-                  name="firstName"
-                  defaultValue={user.firstName}
-                  required
-                  className="mt-2 w-full rounded-md border border-[var(--line)] bg-background px-3 py-2 text-sm placeholder:text-[var(--muted)] focus:border-[var(--teal)] focus:outline-none focus:ring-1 focus:ring-[var(--teal)]"
+                  type="email"
+                  id="email"
+                  defaultValue={user.email}
+                  disabled
+                  className="mt-2 w-full rounded-md border border-[var(--line)] bg-background/50 px-3 py-2 text-sm text-[var(--muted)] cursor-not-allowed"
                 />
+                <p className="mt-1 text-xs text-[var(--muted)]">Email address cannot be changed after account creation.</p>
               </div>
+
               <div>
-                <label htmlFor="lastName" className="block text-sm font-semibold">
-                  Last Name <span className="text-red-500">*</span>
+                <label htmlFor="isActive" className="block text-sm font-semibold">
+                  Account Status
                 </label>
-                <input
-                  type="text"
-                  id="lastName"
-                  name="lastName"
-                  defaultValue={user.lastName}
-                  required
-                  className="mt-2 w-full rounded-md border border-[var(--line)] bg-background px-3 py-2 text-sm placeholder:text-[var(--muted)] focus:border-[var(--teal)] focus:outline-none focus:ring-1 focus:ring-[var(--teal)]"
-                />
+                <select
+                  id="isActive"
+                  name="isActive"
+                  defaultValue={user.isActive ? "true" : "false"}
+                  className="mt-2 w-full rounded-md border border-[var(--line)] bg-background px-3 py-2 text-sm focus:border-[var(--teal)] focus:outline-none focus:ring-1 focus:ring-[var(--teal)]"
+                >
+                  <option value="true">Active (Allowed to sign in)</option>
+                  <option value="false">Inactive (Suspended account)</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end border-t border-[var(--line)] pt-6">
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 rounded-md bg-[var(--teal)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--teal)]/90"
+                >
+                  <Save size={18} /> Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Danger Zone */}
+          <div className="rounded-lg border border-rose-200 bg-rose-50/10 dark:bg-rose-950/10 dark:border-rose-900/40 p-6 shadow-xs space-y-4">
+            <div className="flex items-start gap-3 text-rose-600 dark:text-rose-400">
+              <Trash2 size={22} className="shrink-0 mt-0.5" />
+              <div>
+                <h3 className="font-bold text-base text-foreground">Danger Zone: Permanent Deletion</h3>
+                <p className="text-xs text-[var(--muted)] mt-1">
+                  Perform a permanent hard delete of this user account. The action is audited and only succeeds if the user has zero operational footprints.
+                </p>
               </div>
             </div>
 
-            <div>
-              <label htmlFor="email" className="block text-sm font-semibold">
-                Email Address
-              </label>
-              <input
-                type="email"
-                id="email"
-                defaultValue={user.email}
-                disabled
-                className="mt-2 w-full rounded-md border border-[var(--line)] bg-background/50 px-3 py-2 text-sm text-[var(--muted)] cursor-not-allowed"
-              />
-              <p className="mt-1 text-xs text-[var(--muted)]">Email address cannot be changed after account creation.</p>
+            <div className="rounded-lg bg-background/50 border border-[var(--line)] p-4 text-[11px] text-[var(--muted)] leading-relaxed space-y-2">
+              <p className="font-bold text-foreground">Relational Integrity Guard Rules:</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>Cannot be deleted if assigned to active curriculum subject offerings.</li>
+                <li>Cannot be deleted if they have locked active academic terms.</li>
+                <li>Cannot be deleted if they have saved schedule revision logs or reviews.</li>
+                <li>For accounts with existing footprints, please toggle their <strong>Account Status to Inactive</strong>.</li>
+              </ul>
             </div>
 
-            <div>
-              <label htmlFor="isActive" className="block text-sm font-semibold">
-                Account Status
-              </label>
-              <select
-                id="isActive"
-                name="isActive"
-                defaultValue={user.isActive ? "true" : "false"}
-                className="mt-2 w-full rounded-md border border-[var(--line)] bg-background px-3 py-2 text-sm focus:border-[var(--teal)] focus:outline-none focus:ring-1 focus:ring-[var(--teal)]"
-              >
-                <option value="true">Active (Allowed to sign in)</option>
-                <option value="false">Inactive (Suspended account)</option>
-              </select>
-            </div>
-
-            <div className="flex justify-end border-t border-[var(--line)] pt-6">
+            <form action={deleteUserAction} className="flex justify-end pt-2">
+              <input type="hidden" name="userId" value={user.userId} />
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 rounded-md bg-[var(--teal)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--teal)]/90"
+                className="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-rose-500 transition cursor-pointer"
               >
-                <Save size={18} /> Save Changes
+                <Trash2 size={14} /> Permanently Delete Account
               </button>
-            </div>
-          </form>
+            </form>
+          </div>
         </div>
 
         {/* Role Assignments Panel */}
