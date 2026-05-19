@@ -21,6 +21,10 @@ coverage/
 
 # Local env and secrets
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .env.*
 !.env.example
 .vercel/
@@ -32,8 +36,11 @@ coverage/
 *.pfx
 .npmrc
 credentials.json
+credentials*.json
 client_secret*.json
 *service-account*.json
+pgpass
+.pgpass
 
 # Temp and backups
 *.bak
