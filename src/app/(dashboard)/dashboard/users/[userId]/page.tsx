@@ -37,13 +37,17 @@ type DepartmentOption = {
 
 export default async function UserDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ userId: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const currentUser = await requireCurrentUser();
   requireRole(currentUser, RoleCodeConstants.SystemAdmin);
 
   const { userId } = await params;
+  const { error } = await searchParams;
+  const errorMsg = typeof error === "string" ? error : undefined;
 
   const user = await queryOne<UserDetail>(
     `
@@ -109,6 +113,22 @@ export default async function UserDetailPage({
           </p>
         </div>
       </div>
+
+      {errorMsg && (
+        <div className="mt-6 flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50/50 p-4 text-sm text-rose-800 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400">
+          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h4 className="font-bold">Operational Deletion Blocked</h4>
+            <p className="mt-1 text-xs leading-relaxed">{errorMsg}</p>
+          </div>
+          <Link
+            href={`/dashboard/users/${userId}`}
+            className="text-xs font-semibold underline hover:text-rose-600 transition"
+          >
+            Dismiss
+          </Link>
+        </div>
+      )}
 
       <div className="mt-8 grid gap-8 lg:grid-cols-2">
         {/* Account Details Form */}
