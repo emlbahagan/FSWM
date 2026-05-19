@@ -219,13 +219,36 @@ export async function deleteUserAction(formData: FormData) {
   );
 
   const checkApprovals = await queryOne<{ exists: boolean }>(
-    `SELECT EXISTS (SELECT 1 FROM schedule_reviews WHERE reviewed_by = $1) as "exists"`,
+    `SELECT EXISTS (SELECT 1 FROM schedule_review_records WHERE reviewed_by = $1 OR submitted_by = $1) as "exists"`,
     [userId]
   );
 
-  if (checkSchedules?.exists || checkLockedTerms?.exists || checkRevisions?.exists || checkApprovals?.exists) {
+  const checkOverloads = await queryOne<{ exists: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM overload_override_requests WHERE requested_by = $1 OR decided_by = $1) as "exists"`,
+    [userId]
+  );
+
+  const checkUnlocks = await queryOne<{ exists: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM schedule_unlock_requests WHERE requested_by = $1 OR decided_by = $1) as "exists"`,
+    [userId]
+  );
+
+  const checkReleases = await queryOne<{ exists: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM schedule_release_logs WHERE released_by = $1) as "exists"`,
+    [userId]
+  );
+
+  if (
+    checkSchedules?.exists ||
+    checkLockedTerms?.exists ||
+    checkRevisions?.exists ||
+    checkApprovals?.exists ||
+    checkOverloads?.exists ||
+    checkUnlocks?.exists ||
+    checkReleases?.exists
+  ) {
     throw new Error(
-      "This account has active academic footprint data (schedules, revision logs, reviews, or locked terms) and cannot be hard deleted. Set their status to Inactive to suspend access."
+      "This account has active academic footprint data (schedules, revision logs, reviews, overload requests, unlocks, or locked terms) and cannot be hard deleted. Set their status to Inactive to suspend access."
     );
   }
 
