@@ -23,6 +23,7 @@ export type AuthenticatedUser = {
   permissions: PermissionAssignment[];
   roles: RoleAssignment[];
   userId: string;
+  forcePasswordReset: boolean;
 };
 
 export type SessionPayload = {

@@ -23,8 +23,8 @@ export async function createUserAction(formData: FormData) {
 
   const newUser = await queryOne<{ user_id: string }>(
     `
-      INSERT INTO users (email, first_name, last_name, password_hash, is_active)
-      VALUES ($1, $2, $3, $4, true)
+      INSERT INTO users (email, first_name, last_name, password_hash, is_active, force_password_reset)
+      VALUES ($1, $2, $3, $4, true, true)
       RETURNING user_id
     `,
     [email, firstName, lastName, passwordHash]
@@ -40,7 +40,7 @@ export async function createUserAction(formData: FormData) {
     moduleCode: "USERS",
     targetTable: "users",
     targetId: newUser.user_id,
-    newValueJson: { email, firstName, lastName, isActive: true },
+    newValueJson: { email, firstName, lastName, isActive: true, forcePasswordReset: true },
   });
 
   revalidatePath("/dashboard/users");
@@ -55,6 +55,7 @@ export async function updateUserAction(formData: FormData) {
   const firstName = formData.get("firstName")?.toString().trim();
   const lastName = formData.get("lastName")?.toString().trim();
   const isActive = formData.get("isActive") === "true";
+  const forcePasswordReset = formData.get("forcePasswordReset") === "true";
 
   if (!userId || !firstName || !lastName) {
     throw new Error("Missing required fields");
@@ -63,10 +64,10 @@ export async function updateUserAction(formData: FormData) {
   await query(
     `
       UPDATE users
-      SET first_name = $1, last_name = $2, is_active = $3, updated_at = now()
-      WHERE user_id = $4
+      SET first_name = $1, last_name = $2, is_active = $3, force_password_reset = $4, updated_at = now()
+      WHERE user_id = $5
     `,
-    [firstName, lastName, isActive, userId]
+    [firstName, lastName, isActive, forcePasswordReset, userId]
   );
 
   await recordAuditLog({
@@ -75,7 +76,7 @@ export async function updateUserAction(formData: FormData) {
     moduleCode: "USERS",
     targetTable: "users",
     targetId: userId,
-    newValueJson: { firstName, lastName, isActive },
+    newValueJson: { firstName, lastName, isActive, forcePasswordReset },
   });
 
   revalidatePath(`/dashboard/users/${userId}`);

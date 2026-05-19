@@ -13,6 +13,7 @@ type UserDetail = {
   firstName: string;
   lastName: string;
   isActive: boolean;
+  forcePasswordReset: boolean;
 };
 
 type RoleAssignmentRow = {
@@ -51,7 +52,7 @@ export default async function UserDetailPage({
 
   const user = await queryOne<UserDetail>(
     `
-      SELECT user_id as "userId", email, first_name as "firstName", last_name as "lastName", is_active as "isActive"
+      SELECT user_id as "userId", email, first_name as "firstName", last_name as "lastName", is_active as "isActive", force_password_reset as "forcePasswordReset"
       FROM users
       WHERE user_id = $1
     `,
@@ -194,6 +195,20 @@ export default async function UserDetailPage({
                   <option value="true">Active (Allowed to sign in)</option>
                   <option value="false">Inactive (Suspended account)</option>
                 </select>
+              </div>
+
+              <div className="flex items-center gap-2 mt-4">
+                <input
+                  type="checkbox"
+                  id="forcePasswordReset"
+                  name="forcePasswordReset"
+                  value="true"
+                  defaultChecked={user.forcePasswordReset}
+                  className="h-4 w-4 rounded border-[var(--line)] text-[var(--teal)] focus:ring-[var(--teal)] bg-background cursor-pointer"
+                />
+                <label htmlFor="forcePasswordReset" className="text-sm font-medium text-foreground cursor-pointer select-none">
+                  Force password change on next sign in
+                </label>
               </div>
 
               <div className="flex justify-end border-t border-[var(--line)] pt-6">

@@ -84,8 +84,8 @@ export default async function NewUserPage() {
               placeholder="Enter password"
               className="mt-2 w-full rounded-md border border-[var(--line)] bg-background px-3 py-2 text-sm placeholder:text-[var(--muted)] focus:border-[var(--teal)] focus:outline-none focus:ring-1 focus:ring-[var(--teal)]"
             />
-            <p className="mt-1.5 text-xs text-[var(--muted)]">
-              The user will use this password to sign in initially.
+            <p className="mt-1.5 text-xs text-amber-500 font-medium">
+              Mandatory Security: The user will be required to change this temporary password immediately upon their first sign in.
             </p>
           </div>
 

@@ -18,6 +18,7 @@ type UserRow = {
   is_active: boolean;
   last_name: string;
   user_id: string;
+  force_password_reset: boolean;
 };
 
 type RoleRow = {
@@ -48,6 +49,7 @@ export const getCurrentUser = cache(async (): Promise<AuthenticatedUser | null> 
         u.first_name,
         u.last_name,
         u.is_active,
+        u.force_password_reset,
         fp.faculty_id,
         fp.department_id
       FROM users u
@@ -115,14 +117,19 @@ export const getCurrentUser = cache(async (): Promise<AuthenticatedUser | null> 
       scopeDepartmentId: role.scope_department_id,
     })),
     userId: user.user_id,
+    forcePasswordReset: user.force_password_reset,
   };
 });
 
-export async function requireCurrentUser() {
+export async function requireCurrentUser(options?: { allowForceResetPage?: boolean }) {
   const user = await getCurrentUser();
 
   if (!user) {
     redirect("/login");
+  }
+
+  if (user.forcePasswordReset && !options?.allowForceResetPage) {
+    redirect("/change-password");
   }
 
   return user;
