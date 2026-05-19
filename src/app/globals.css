@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --bg-gradient: linear-gradient(135deg, #fbfcfd 0%, #f1f5f9 100%);
+  --foreground: #0f172a;
+  --muted: #64748b;
+  --panel: #ffffff;
+  --line: #e2e8f0;
+  --teal: #1e293b; /* Premium dark navy/slate for primary light mode accents */
+  --teal-light: #334155;
+  --amber: #d97706;
+  --rose: #e11d48;
+  --hero-glow: rgba(59, 130, 246, 0.08);
+}
+
+html.dark {
+  --background: #0f172a;
+  --bg-gradient: linear-gradient(135deg, #0f172a 0%, #020617 100%);
+  --foreground: #f8fafc;
+  --muted: #94a3b8;
+  --panel: #1e293b;
+  --line: #334155;
+  --teal: #38bdf8; /* Premium cyan/blue for dark mode accents */
+  --teal-light: #0284c7;
+  --amber: #f59e0b;
+  --rose: #fb7185;
+  --hero-glow: rgba(56, 189, 248, 0.05);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+}
+
+body {
+  background: var(--bg-gradient);
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  min-h: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Custom transitions and scrollbar styling */
+.transition-theme {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}

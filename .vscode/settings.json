@@ -1,0 +1,42 @@
+{
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 1000,
+  "editor.formatOnSave": true,
+  "editor.tabSize": 2,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "editor.cursorBlinking": "smooth",
+  "editor.cursorSmoothCaretAnimation": "on",
+  "editor.smoothScrolling": true,
+  "editor.stickyScroll.enabled": true,
+  "editor.minimap.enabled": false,
+  "editor.lineHeight": 1.6,
+  "editor.letterSpacing": 0.5,
+  "editor.fontFamily": "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace",
+  "editor.fontLigatures": true,
+  "eslint.enable": true,
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact",
+    "html",
+    "vue"
+  ],
+  "prettier.singleQuote": true,
+  "prettier.trailingComma": "es5",
+  "prettier.semi": false,
+  "emmet.includeLanguages": {
+    "javascript": "javascriptreact",
+    "typescript": "typescriptreact"
+  },
+  "liveServer.settings.port": 5500,
+  "workbench.colorCustomizations": {},
+  "workbench.iconTheme": "vscode-icons",
+  "terminal.integrated.fontSize": 14,
+  "terminal.integrated.fontWeight": "normal",
+  "editor.linkedEditing": true,
+  "editor.suggestSelection": "first",
+  "vsintellicode.modifyConfigOnSelect": "none"
+}

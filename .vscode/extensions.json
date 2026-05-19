@@ -1,0 +1,19 @@
+{
+  "recommendations": [
+    "esbenp.prettier-vscode", // Code formatter
+    "dbaeumer.vscode-eslint", // ESLint integration
+    "ritwickdey.LiveServer", // Live preview server
+    "msjsdiag.debugger-for-chrome", // Chrome debugger
+    "bradlc.vscode-tailwindcss", // Tailwind CSS IntelliSense
+    "visualstudioexptteam.vscodeintellicode", // AI-assisted IntelliSense
+    "eamodio.gitlens", // Git insights
+    "formulahendry.auto-rename-tag", // Auto rename HTML/XML tags
+    "formulahendry.auto-close-tag", // Auto close HTML/XML tags
+    "wallabyjs.console-ninja", // Console output in editor
+    "pkief.material-icon-theme", // Better icons
+    "usernamehw.errorlens", // Error highlighting in-line
+    "naumovs.color-highlight", // Highlight colors in CSS
+    "jpoissonnier.vscode-styled-components", // Styled components support
+    "ms-vscode.vscode-typescript-next" // Latest TypeScript support
+  ]
+}
