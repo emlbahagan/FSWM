@@ -194,75 +194,140 @@ export async function deleteUserAction(formData: FormData) {
     redirect(`/dashboard/users/${userId}?error=${encodeURIComponent("You cannot hard delete your own active administrator account.")}`);
   }
 
+  const targetUser = await queryOne<{ is_active: boolean }>(
+    `SELECT is_active as "is_active" FROM users WHERE user_id = $1`,
+    [userId]
+  );
+
+  if (!targetUser) {
+    redirect(`/dashboard/users?error=${encodeURIComponent("User not found.")}`);
+  }
+
+  const isUserInactive = !targetUser.is_active;
+
   try {
-    // 1. Relational database integrity pre-flight checks
-    const checkSchedules = await queryOne<{ exists: boolean }>(
-      `
-        SELECT EXISTS (
-          SELECT 1 FROM schedule_assignments 
-          WHERE created_by = $1 
-          OR faculty_term_profile_id IN (
+    if (isUserInactive) {
+      // 1. Force Overdrive Cascade Purging for Inactive/Suspended Users
+      const adminId = currentUser.userId;
+
+      // A. Nullify schedule assignments linked to the faculty member (keeps offering, removes faculty allocation)
+      await query(
+        `
+          UPDATE schedule_assignments 
+          SET faculty_term_profile_id = NULL 
+          WHERE faculty_term_profile_id IN (
             SELECT faculty_term_profile_id FROM faculty_term_profiles WHERE faculty_id = $1
           )
-        ) as "exists"
-      `,
-      [userId]
-    );
-
-    const checkLockedTerms = await queryOne<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM academic_terms WHERE locked_by = $1) as "exists"`,
-      [userId]
-    );
-
-    const checkRevisions = await queryOne<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM schedule_revision_history WHERE changed_by = $1) as "exists"`,
-      [userId]
-    );
-
-    const checkApprovals = await queryOne<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM schedule_review_records WHERE reviewed_by = $1 OR submitted_by = $1) as "exists"`,
-      [userId]
-    );
-
-    const checkOverloads = await queryOne<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM overload_override_requests WHERE requested_by = $1 OR decided_by = $1) as "exists"`,
-      [userId]
-    );
-
-    const checkUnlocks = await queryOne<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM schedule_unlock_requests WHERE requested_by = $1 OR decided_by = $1) as "exists"`,
-      [userId]
-    );
-
-    const checkReleases = await queryOne<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM schedule_release_logs WHERE released_by = $1) as "exists"`,
-      [userId]
-    );
-
-    if (
-      checkSchedules?.exists ||
-      checkLockedTerms?.exists ||
-      checkRevisions?.exists ||
-      checkApprovals?.exists ||
-      checkOverloads?.exists ||
-      checkUnlocks?.exists ||
-      checkReleases?.exists
-    ) {
-      redirect(
-        `/dashboard/users/${userId}?error=${encodeURIComponent(
-          "This account has active academic footprint data (schedules, revision logs, reviews, overload requests, unlocks, or locked terms) and cannot be hard deleted. Set their status to Inactive to suspend access."
-        )}`
+        `,
+        [userId]
       );
-    }
 
-    // 2. Cascade delete minor scoped references in transactional boundary
-    await query(`DELETE FROM user_role_assignments WHERE user_id = $1`, [userId]);
-    await query(`DELETE FROM faculty_availability WHERE faculty_term_profile_id IN (SELECT faculty_term_profile_id FROM faculty_term_profiles WHERE faculty_id = $1)`, [userId]);
-    await query(`DELETE FROM faculty_specializations WHERE faculty_id = $1`, [userId]);
-    await query(`DELETE FROM faculty_term_profiles WHERE faculty_id = $1`, [userId]);
-    await query(`DELETE FROM faculty_profiles WHERE faculty_id = $1`, [userId]);
-    await query(`DELETE FROM audit_logs WHERE actor_user_id = $1`, [userId]); // clear their logs to allow foreign key delete
-    await query(`DELETE FROM users WHERE user_id = $1`, [userId]);
+      // B. Update/Re-assign audit and administrative actions to the current Admin actor to bypass RESTRICT
+      await query(`UPDATE schedule_versions SET created_by = $2 WHERE created_by = $1`, [userId, adminId]);
+      await query(`UPDATE schedule_versions SET submitted_by = $2 WHERE submitted_by = $1`, [userId, adminId]);
+      await query(`UPDATE schedule_versions SET approved_by = $2 WHERE approved_by = $1`, [userId, adminId]);
+      await query(`UPDATE schedule_versions SET released_by = $2 WHERE released_by = $1`, [userId, adminId]);
+      
+      await query(`UPDATE schedule_assignments SET created_by = $2 WHERE created_by = $1`, [userId, adminId]);
+      
+      await query(`UPDATE schedule_revision_history SET changed_by = $2 WHERE changed_by = $1`, [userId, adminId]);
+      
+      await query(`UPDATE schedule_review_records SET submitted_by = $2 WHERE submitted_by = $1`, [userId, adminId]);
+      await query(`UPDATE schedule_review_records SET reviewed_by = $2 WHERE reviewed_by = $1`, [userId, adminId]);
+      
+      await query(`UPDATE overload_override_requests SET requested_by = $2 WHERE requested_by = $1`, [userId, adminId]);
+      await query(`UPDATE overload_override_requests SET decided_by = $2 WHERE decided_by = $1`, [userId, adminId]);
+      
+      await query(`UPDATE schedule_unlock_requests SET requested_by = $2 WHERE requested_by = $1`, [userId, adminId]);
+      await query(`UPDATE schedule_unlock_requests SET decided_by = $2 WHERE decided_by = $1`, [userId, adminId]);
+      
+      await query(`UPDATE schedule_release_logs SET released_by = $2 WHERE released_by = $1`, [userId, adminId]);
+      
+      await query(`UPDATE academic_terms SET locked_by = $2 WHERE locked_by = $1`, [userId, adminId]);
+      await query(`UPDATE import_batches SET uploaded_by = $2 WHERE uploaded_by = $1`, [userId, adminId]);
+
+      // C. Delete personal references and availability logs
+      await query(`DELETE FROM faculty_schedule_acknowledgements WHERE faculty_id = $1`, [userId]);
+      await query(`DELETE FROM privacy_notice_acceptances WHERE user_id = $1`, [userId]);
+      await query(`DELETE FROM overload_override_requests WHERE faculty_term_profile_id IN (SELECT faculty_term_profile_id FROM faculty_term_profiles WHERE faculty_id = $1)`, [userId]);
+      await query(`DELETE FROM faculty_availability WHERE faculty_term_profile_id IN (SELECT faculty_term_profile_id FROM faculty_term_profiles WHERE faculty_id = $1)`, [userId]);
+      await query(`DELETE FROM faculty_specializations WHERE faculty_id = $1`, [userId]);
+      await query(`DELETE FROM faculty_term_profiles WHERE faculty_id = $1`, [userId]);
+      await query(`DELETE FROM faculty_profiles WHERE faculty_id = $1`, [userId]);
+      await query(`DELETE FROM user_role_assignments WHERE user_id = $1`, [userId]);
+      await query(`DELETE FROM audit_logs WHERE actor_user_id = $1`, [userId]);
+      await query(`DELETE FROM users WHERE user_id = $1`, [userId]);
+
+    } else {
+      // 2. Active User checks (Normal strict validation workflow)
+      const checkSchedules = await queryOne<{ exists: boolean }>(
+        `
+          SELECT EXISTS (
+            SELECT 1 FROM schedule_assignments 
+            WHERE created_by = $1 
+            OR faculty_term_profile_id IN (
+              SELECT faculty_term_profile_id FROM faculty_term_profiles WHERE faculty_id = $1
+            )
+          ) as "exists"
+        `,
+        [userId]
+      );
+
+      const checkLockedTerms = await queryOne<{ exists: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM academic_terms WHERE locked_by = $1) as "exists"`,
+        [userId]
+      );
+
+      const checkRevisions = await queryOne<{ exists: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM schedule_revision_history WHERE changed_by = $1) as "exists"`,
+        [userId]
+      );
+
+      const checkApprovals = await queryOne<{ exists: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM schedule_review_records WHERE reviewed_by = $1 OR submitted_by = $1) as "exists"`,
+        [userId]
+      );
+
+      const checkOverloads = await queryOne<{ exists: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM overload_override_requests WHERE requested_by = $1 OR decided_by = $1) as "exists"`,
+        [userId]
+      );
+
+      const checkUnlocks = await queryOne<{ exists: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM schedule_unlock_requests WHERE requested_by = $1 OR decided_by = $1) as "exists"`,
+        [userId]
+      );
+
+      const checkReleases = await queryOne<{ exists: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM schedule_release_logs WHERE released_by = $1) as "exists"`,
+        [userId]
+      );
+
+      if (
+        checkSchedules?.exists ||
+        checkLockedTerms?.exists ||
+        checkRevisions?.exists ||
+        checkApprovals?.exists ||
+        checkOverloads?.exists ||
+        checkUnlocks?.exists ||
+        checkReleases?.exists
+      ) {
+        redirect(
+          `/dashboard/users/${userId}?error=${encodeURIComponent(
+            "This account is Active and has operational footprints (schedules, locks, releases, or unlocks). Active accounts cannot be hard deleted. Please set their status to Inactive first to allow force overdrive cascade purging."
+          )}`
+        );
+      }
+
+      // Safe clean delete for active user with no references
+      await query(`DELETE FROM user_role_assignments WHERE user_id = $1`, [userId]);
+      await query(`DELETE FROM faculty_availability WHERE faculty_term_profile_id IN (SELECT faculty_term_profile_id FROM faculty_term_profiles WHERE faculty_id = $1)`, [userId]);
+      await query(`DELETE FROM faculty_specializations WHERE faculty_id = $1`, [userId]);
+      await query(`DELETE FROM faculty_term_profiles WHERE faculty_id = $1`, [userId]);
+      await query(`DELETE FROM faculty_profiles WHERE faculty_id = $1`, [userId]);
+      await query(`DELETE FROM audit_logs WHERE actor_user_id = $1`, [userId]);
+      await query(`DELETE FROM users WHERE user_id = $1`, [userId]);
+    }
 
     // 3. Log deletion audit record from the Admin actor's perspective
     await recordAuditLog({
